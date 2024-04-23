@@ -13,26 +13,26 @@ namespace GalleryMaker
 {
     internal class Program
     {
-        static string StripeKey;
+        static string stripeKey;
         static string hashKey;
 
 
         static void Main(string[] args)
         {
 
-            //fetch secrets
+            //fetch secrets, more information on this style of secret storage/retrieval is at 
+            //https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets?view=aspnetcore-8.0&tabs=windows#user-secrets-in-non-web-applications
             IConfigurationRoot config = new ConfigurationBuilder()
                 .AddUserSecrets<Program>()
                 .Build();
 
-            StripeKey = config["stripekey"];
+            stripeKey = config["stripekey"];
             hashKey = config["hashstring"];
 
-
-            StripeConfiguration.ApiKey = StripeKey;
+            //using the .NET SDK for Stripe: https://github.com/stripe/stripe-dotnet 
+            StripeConfiguration.ApiKey = stripeKey;
 
             //determine if the provided folder is a folder of folders or of images
-
             if (args.Length != 3)
             {
                 Console.WriteLine("Invalid number of arguments supplied");
@@ -46,6 +46,7 @@ namespace GalleryMaker
             {
                 baseURL = baseURL.Substring(0, baseURL.Length - 1);
             }
+
             var subFolders = Directory.GetDirectories(inputPath);
             var options = new JsonSerializerOptions { WriteIndented = true };
             if (subFolders.Length > 0 )
@@ -56,7 +57,11 @@ namespace GalleryMaker
                 foreach ( var subFolder in subFolders )
                 {
                     var folderName = Path.GetFileName(subFolder).ToLower();
-                    Album album = new Album() { Description = "", Title = folderName, Pictures = new List<Picture>(), BaseURL = baseURL + "/" + folderName };
+                    Album album = new Album() { Description = "", 
+                        Title = folderName, 
+                        Pictures = new List<Picture>(), 
+                        BaseURL = baseURL + "/" + folderName 
+                    };
                     List<Picture> pictures = ProcessAlbum(subFolder, Path.Combine(outputPath, folderName), album.BaseURL);
                     album.Pictures.AddRange(pictures);
                     group.Albums.Add(album);
@@ -68,7 +73,11 @@ namespace GalleryMaker
             else
             {
                 var folderName = Path.GetFileName(inputPath).ToLower(); ;
-                Album album = new Album() { Description = "", Title = folderName, Pictures = new List<Picture>(), BaseURL = baseURL };
+                Album album = new Album() { Description = "", 
+                    Title = folderName, 
+                    Pictures = new List<Picture>(), 
+                    BaseURL = baseURL 
+                };
                 List<Picture> pictures = ProcessAlbum(inputPath, outputPath, baseURL);
                 album.Pictures.AddRange(pictures);
                 string output = JsonSerializer.Serialize(album, options);
@@ -81,14 +90,13 @@ namespace GalleryMaker
         {
 
             if (!Directory.Exists(outputPath)) { Directory.CreateDirectory(outputPath); }
+
             List<Picture> pictures = new List<Picture>();
             var files = Directory.GetFiles(subFolder,"*.jpg");
+
             foreach (var file in files)
             {
-
-                string fileName = Path.GetFileName(file);
                 //now get the resolution of the image, get the title and caption from the EXIF
-
                 FileInfo fileInfo = new FileInfo(file);
                 long fileSize = fileInfo.Length / 1048576;
 
@@ -147,21 +155,7 @@ namespace GalleryMaker
 
                 string sourceID = $"{imageDate:u}{title}";
 
-                System.Security.Cryptography.HMACMD5 hmac = new System.Security.Cryptography.HMACMD5(Encoding.ASCII.GetBytes(hashKey));
-
-                var hash = hmac.ComputeHash(Encoding.ASCII.GetBytes(sourceID));
-
-                var sBuilder = new StringBuilder();
-
-                // Loop through each byte of the hashed data
-                // and format each one as a hexadecimal string.
-                for (int i = 0; i < hash.Length; i++)
-                {
-                    sBuilder.Append(hash[i].ToString("x2"));
-                }
-
-                // Return the hexadecimal string.
-                sourceID = sBuilder.ToString();
+                sourceID = CreateHashedID(sourceID);
 
                 //make a copy of the source image, using the unique ID
                 string outputFileName = Path.Combine(outputPath, $"{sourceID}.jpg").ToLower();
@@ -204,6 +198,32 @@ namespace GalleryMaker
             }
 
             return pictures;
+        }
+
+        /// <summary>
+        /// Just want to create a simple string that will uniquely identify the image
+        /// This is not intended to be a secret, no concerns it could be reversed
+        /// </summary>
+        /// <param name="sourceID">String to hash</param>
+        /// <returns></returns>
+        private static string CreateHashedID(string sourceID)
+        {
+            System.Security.Cryptography.HMACMD5 hmac = new System.Security.Cryptography.HMACMD5(Encoding.ASCII.GetBytes(hashKey));
+
+            var hash = hmac.ComputeHash(Encoding.ASCII.GetBytes(sourceID));
+
+            var sBuilder = new StringBuilder();
+
+            // Loop through each byte of the hashed data
+            // and format each one as a hexadecimal string.
+            for (int i = 0; i < hash.Length; i++)
+            {
+                sBuilder.Append(hash[i].ToString("x2"));
+            }
+
+            // Return the hexadecimal string.
+            sourceID = sBuilder.ToString();
+            return sourceID;
         }
 
         /// <summary>
