@@ -29,6 +29,7 @@ namespace GalleryMaker
     public class Picture
     {
         public string Title { get; set; }
+        public string uniqueID { get; set; }
         public string Caption { get; set; }
         public string Latitude { get; set; }
         public string Longitude { get; set; }
@@ -40,6 +41,8 @@ namespace GalleryMaker
         public DateTimeOffset? DateTimeOriginal { get; set; }
 
         public List<Link> Links { get; set; }
+
+        public string PaymentLink { get; set; }
     }
 
     public class Link
