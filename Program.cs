@@ -1,13 +1,12 @@
-﻿using ImageMagick;
+﻿using Azure.Storage.Blobs;
+using ImageMagick;
 using Microsoft.Extensions.Configuration;
 using Stripe;
 using System.Globalization;
-using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
-using static System.Runtime.InteropServices.JavaScript.JSType;
+using File = System.IO.File;
 
 namespace GalleryMaker
 {
@@ -15,7 +14,9 @@ namespace GalleryMaker
     {
         static string stripeKey;
         static string hashKey;
+        static string azureConnectionString;
 
+        static string[] notForSaleProducts = [];
 
         static void Main(string[] args)
         {
@@ -28,9 +29,15 @@ namespace GalleryMaker
 
             stripeKey = config["stripekey"];
             hashKey = config["hashstring"];
+            azureConnectionString = config["AzureConnectionString"];
 
             //using the .NET SDK for Stripe: https://github.com/stripe/stripe-dotnet 
             StripeConfiguration.ApiKey = stripeKey;
+            StripeConfiguration.AppInfo = new AppInfo() { Name = "Gallery Maker" };
+
+            //load all my products
+            LoadProducts();
+
 
             //determine if the provided folder is a folder of folders or of images
             if (args.Length != 3)
@@ -83,6 +90,23 @@ namespace GalleryMaker
                 string output = JsonSerializer.Serialize(album, options);
                 Console.WriteLine(output);
                 System.IO.File.WriteAllText(Path.Combine(outputPath, "album.json"), output);
+            }
+        }
+
+        static Dictionary<string, Product> products = new Dictionary<string, Product>();
+        private static void LoadProducts()
+        {
+            var service = new ProductService();
+            var options = new ProductListOptions
+            {
+                Expand = ["data.default_price"], 
+                Limit = 100
+            };
+
+            // Synchronously paginate
+            foreach (var product in service.ListAutoPaging(options))
+            {
+                products.Add(product.Id, product);
             }
         }
 
@@ -158,8 +182,16 @@ namespace GalleryMaker
                 sourceID = CreateHashedID(sourceID);
 
                 //make a copy of the source image, using the unique ID
-                string outputFileName = Path.Combine(outputPath, $"{sourceID}.jpg").ToLower();
-                System.IO.File.Copy(file, outputFileName, true);
+                string originalFolderPath = Path.Combine(outputPath, "originals");
+                Directory.CreateDirectory(originalFolderPath);
+
+                string outputFileName = Path.Combine(originalFolderPath, $"{sourceID}.jpg").ToLower();
+
+                File.Copy(file, outputFileName, true);
+
+                //ok, upload outputFileName to originals container, path = /
+
+                uploadToAzure(outputFileName, "originals", "");
 
                 var iptc = imageFromFile.GetIptcProfile();
 
@@ -189,9 +221,11 @@ namespace GalleryMaker
                 pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 540, baseURL));
                 pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 220, baseURL));
 
-                string paymentLinkURL = CreateStripeObjects(fileSize, height, width, pic.Title, pic.uniqueID, pic.Caption, stripeThumbnail.Url);
-
-                pic.PaymentLink = paymentLinkURL;
+                if (!notForSaleProducts.Contains(sourceID) || Math.Max(height, width) < 3000)
+                {
+                    string paymentLinkURL = CreateStripeObjects(fileSize, height, width, pic.Title, pic.uniqueID, pic.Caption, stripeThumbnail.Url);
+                    pic.PaymentLink = paymentLinkURL;
+                }
 
                 pictures.Add(pic);
 
@@ -208,7 +242,7 @@ namespace GalleryMaker
         /// <returns></returns>
         private static string CreateHashedID(string sourceID)
         {
-            System.Security.Cryptography.HMACMD5 hmac = new System.Security.Cryptography.HMACMD5(Encoding.ASCII.GetBytes(hashKey));
+            System.Security.Cryptography.HMACMD5 hmac = new (Encoding.ASCII.GetBytes(hashKey));
 
             var hash = hmac.ComputeHash(Encoding.ASCII.GetBytes(sourceID));
 
@@ -256,16 +290,12 @@ namespace GalleryMaker
             ProductGetOptions productGetOptions = new ProductGetOptions();
             productGetOptions.AddExpand("default_price");
 
-            try
-            {
-                product = productService.Get(pictureId, productGetOptions);
-            }
-            catch
-            {
-                product = null;
-            }
 
-            if (product is null)
+            if (products.ContainsKey(pictureId))
+            {
+                product = products[pictureId];
+            }
+            else
             {
                 var productOptions = new ProductCreateOptions
                 {
@@ -360,7 +390,23 @@ namespace GalleryMaker
             var i = new ImageOptimizer();
             i.OptimalCompression = true;
             i.Compress(newFilePath);
+
+            //upload newFilePath to Blob container "photos", path = baseURL - "https://photos.duncanmackenzie.net"
+            uploadToAzure(newFilePath, "photos", baseURL.Replace("https://photos.duncanmackenzie.net/", ""));
+
             return link;
+        }
+
+        private static void uploadToAzure(string localFilePath, string containerName, string cloudPath)
+        {
+            BlobServiceClient serviceClient = new BlobServiceClient(azureConnectionString);
+            BlobContainerClient containerClient = serviceClient.GetBlobContainerClient(containerName);
+
+            string fileName = Path.GetFileName(localFilePath);
+            string blobName = cloudPath + "/" + fileName;
+
+            BlobClient blobClient = containerClient.GetBlobClient(blobName);
+            blobClient.Upload(localFilePath, true);
         }
 
 
