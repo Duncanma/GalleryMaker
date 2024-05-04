@@ -1,4 +1,5 @@
 ﻿using Azure.Storage.Blobs;
+using Azure.Storage.Blobs.Models;
 using ImageMagick;
 using Microsoft.Extensions.Configuration;
 using Stripe;
@@ -16,10 +17,26 @@ namespace GalleryMaker
         static string hashKey;
         static string azureConnectionString;
 
-        static string[] notForSaleProducts = [];
+        static string[] notForSaleProducts = [
+            "f40cc48ede9c198205d81b8b240bdb00",
+            "e4c0fbc87e219b760bb436983fc59f62",
+            "93c8d183d589c178878fc954bb2b9633",
+            "55357baa98c5210a7271144b6b2a09c7",
+            "f679f80d3a5c3acb98a5255698d676eb",
+            "d5f304d795096f00b8b52838288c05b0"
+        ];
+
+        static bool doFileCopyandUpload = true;
+        static bool doStripeStuff = true;
+        static bool updateProducts = true;
+
+        static List<Album> albumList = new List<Album>();
+        static Dictionary<string, Picture> pictureLookup = new Dictionary<string, Picture>();
 
         static void Main(string[] args)
         {
+
+            LoadPictures("C:\\Repos\\Blog\\content\\albums");
 
             //fetch secrets, more information on this style of secret storage/retrieval is at 
             //https://learn.microsoft.com/en-us/aspnet/core/security/app-secrets?view=aspnetcore-8.0&tabs=windows#user-secrets-in-non-web-applications
@@ -36,7 +53,10 @@ namespace GalleryMaker
             StripeConfiguration.AppInfo = new AppInfo() { Name = "Gallery Maker" };
 
             //load all my products
-            LoadProducts();
+            if (doStripeStuff)
+            {
+                LoadProducts();
+            }
 
 
             //determine if the provided folder is a folder of folders or of images
@@ -64,6 +84,7 @@ namespace GalleryMaker
                 foreach ( var subFolder in subFolders )
                 {
                     var folderName = Path.GetFileName(subFolder).ToLower();
+
                     Album album = new Album() { Description = "", 
                         Title = folderName, 
                         Pictures = new List<Picture>(), 
@@ -71,15 +92,27 @@ namespace GalleryMaker
                     };
                     List<Picture> pictures = ProcessAlbum(subFolder, Path.Combine(outputPath, folderName), album.BaseURL);
                     album.Pictures.AddRange(pictures);
+                    if (pictures.Exists(p => p.PaymentLink != null))
+                    {
+                        album.Outputs = ["html", "purchase"];
+                    }
+                    var existingAlbum = albumList.Find(a => a.BaseURL == baseURL);
+                    if (existingAlbum != null)
+                    {
+                        album.Description = existingAlbum.Description;
+                        album.Title = existingAlbum.Title;
+                        album.Featured = existingAlbum.Featured;
+                    }
                     group.Albums.Add(album);
                 }
                 string output = JsonSerializer.Serialize(group, options);
                 Console.WriteLine(output);
-                System.IO.File.WriteAllText(Path.Combine(outputPath, "group.json"), output);
+                File.WriteAllText(Path.Combine(outputPath, "group.json"), output);
             }
             else
             {
-                var folderName = Path.GetFileName(inputPath).ToLower(); ;
+                var folderName = Path.GetFileName(inputPath).ToLower();
+
                 Album album = new Album() { Description = "", 
                     Title = folderName, 
                     Pictures = new List<Picture>(), 
@@ -87,15 +120,61 @@ namespace GalleryMaker
                 };
                 List<Picture> pictures = ProcessAlbum(inputPath, outputPath, baseURL);
                 album.Pictures.AddRange(pictures);
+                if (pictures.Exists(p => p.PaymentLink != null))
+                {
+                    album.Outputs = ["html", "purchase"];
+                }
+
+                var existingAlbum = albumList.Find(a => a.BaseURL == baseURL);
+                if (existingAlbum != null)
+                {
+                    album.Description = existingAlbum.Description;
+                    album.Title = existingAlbum.Title;
+                    album.Featured = existingAlbum.Featured;
+                }
+
                 string output = JsonSerializer.Serialize(album, options);
                 Console.WriteLine(output);
-                System.IO.File.WriteAllText(Path.Combine(outputPath, "album.json"), output);
+                File.WriteAllText(Path.Combine(outputPath, "album.json"), output);
+            }
+        }
+
+        private static void LoadPictures(string path)
+        {
+            var albumFiles = Directory.GetFiles(path, "*.md");
+
+            foreach (var file in albumFiles)
+            {
+                string content = File.ReadAllText(file);
+                int startOfJSON = content.IndexOf("{");
+                if (startOfJSON != -1)
+                {
+                    content = content.Substring(startOfJSON);
+                    content = content.Substring(0, content.LastIndexOf("}") + 1);
+
+                    Album? album = JsonSerializer.Deserialize<Album>(content);
+
+                    if (album != null)
+                    {
+                        foreach (var picture in album.Pictures)
+                        {
+                            if (picture.uniqueID != null && !pictureLookup.ContainsKey(picture.uniqueID))
+                            {
+                                pictureLookup.Add(picture.uniqueID, picture);
+                            }
+                        }
+                        albumList.Add(album);
+                    }
+                }
             }
         }
 
         static Dictionary<string, Product> products = new Dictionary<string, Product>();
         private static void LoadProducts()
         {
+            //list products
+            //get price
+
             var service = new ProductService();
             var options = new ProductListOptions
             {
@@ -186,17 +265,25 @@ namespace GalleryMaker
                 Directory.CreateDirectory(originalFolderPath);
 
                 string outputFileName = Path.Combine(originalFolderPath, $"{sourceID}.jpg").ToLower();
+                if (doFileCopyandUpload)
+                {
+                    File.Copy(file, outputFileName, true);
+                    //ok, upload outputFileName to originals container, path = /
+                    uploadToAzure(outputFileName, "originals", "");
+                }
 
-                File.Copy(file, outputFileName, true);
-
-                //ok, upload outputFileName to originals container, path = /
-
-                uploadToAzure(outputFileName, "originals", "");
 
                 var iptc = imageFromFile.GetIptcProfile();
 
                 title = iptc?.GetValue(IptcTag.Title)?.Value ?? title;
                 caption = iptc?.GetValue(IptcTag.Caption)?.Value ?? "";
+
+                if (pictureLookup.ContainsKey(sourceID))
+                {
+                    var existingPicture = pictureLookup[sourceID];
+                    title = existingPicture.Title;
+                    caption = existingPicture.Caption;
+                }
 
                 var pic = new Picture()
                 {
@@ -213,20 +300,26 @@ namespace GalleryMaker
                     uniqueID = sourceID
                 };
 
-                pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 2160, baseURL));
-
-                Link stripeThumbnail = ResizeAndSaveFile(outputPath, file, imageFromFile, 1080, baseURL);
-                pic.Links.Add(stripeThumbnail);
-
-                pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 540, baseURL));
-                pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 220, baseURL));
-
-                if (!notForSaleProducts.Contains(sourceID) || Math.Max(height, width) < 3000)
+                if (doFileCopyandUpload && doStripeStuff)
                 {
-                    string paymentLinkURL = CreateStripeObjects(fileSize, height, width, pic.Title, pic.uniqueID, pic.Caption, stripeThumbnail.Url);
-                    pic.PaymentLink = paymentLinkURL;
-                }
+                    List<string> thumbnails = new List<string>();
+                    pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 2160, baseURL));
+                    pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 1080, baseURL));
+                    pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 540, baseURL));
+                    pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 220, baseURL));
 
+                    foreach (var item in pic.Links)
+                    {
+                        thumbnails.Add(item.Url);
+                    }
+
+
+                    if (!notForSaleProducts.Contains(sourceID) || Math.Max(height, width) < 3000)
+                    {
+                        string paymentLinkURL = CreateStripeObjects(fileSize, height, width, pic.Title, pic.uniqueID, pic.Caption, thumbnails);
+                        pic.PaymentLink = paymentLinkURL;
+                    }
+                }
                 pictures.Add(pic);
 
             }
@@ -271,7 +364,7 @@ namespace GalleryMaker
         /// <param name="caption">If the photo has an EXIF caption, we'll include it in the product description</param>
         /// <param name="stripeThumbnail">Link to an image to be added to the product, will show on the checkout page</param>
         /// <returns>Url of the Payment Link to be used to purchase this image</returns>
-        private static string CreateStripeObjects(long fileSize, int height, int width, string pictureTitle, string pictureId, string caption, string stripeThumbnail)
+        private static string CreateStripeObjects(long fileSize, int height, int width, string pictureTitle, string pictureId, string caption, List<string> stripeThumbnails)
         {
 
             /*
@@ -294,6 +387,17 @@ namespace GalleryMaker
             if (products.ContainsKey(pictureId))
             {
                 product = products[pictureId];
+                if (updateProducts)
+                {
+                    var productOptions = new ProductUpdateOptions
+                    {
+                        Name = pictureTitle,
+                        Images = stripeThumbnails,
+                        TaxCode = "txcd_10501000",
+                    };
+                    productService.Update(pictureId, productOptions);
+                }
+
             }
             else
             {
@@ -301,7 +405,7 @@ namespace GalleryMaker
                 {
                     Name = pictureTitle,
                     Id = pictureId,
-                    Images = new List<string>() { stripeThumbnail },
+                    Images = stripeThumbnails,
                     Type = "good",
                     TaxCode = "txcd_10501000",
                 };
@@ -406,7 +510,15 @@ namespace GalleryMaker
             string blobName = cloudPath + "/" + fileName;
 
             BlobClient blobClient = containerClient.GetBlobClient(blobName);
-            blobClient.Upload(localFilePath, true);
+
+            BlobUploadOptions options = new BlobUploadOptions();
+
+            options.HttpHeaders = new BlobHttpHeaders
+            {
+                ContentType = "image/jpeg"
+            };
+
+            blobClient.Upload(path: localFilePath, options: options);
         }
 
 
