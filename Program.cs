@@ -308,7 +308,7 @@ namespace GalleryMaker
                     pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 540, baseURL));
                     pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 220, baseURL));
 
-                    foreach (var item in pic.Links)
+                    foreach (var item in pic.Links.Where(l => l.Width <= 1000))
                     {
                         thumbnails.Add(item.Url);
                     }
