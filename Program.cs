@@ -102,6 +102,11 @@ namespace GalleryMaker
                         album.Description = existingAlbum.Description;
                         album.Title = existingAlbum.Title;
                         album.Featured = existingAlbum.Featured;
+                        album.Tags = existingAlbum.Tags;
+                    }
+                    else
+                    {
+                        album.Tags = ["Photography"];
                     }
                     group.Albums.Add(album);
                 }

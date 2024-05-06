@@ -19,6 +19,7 @@ namespace GalleryMaker
     public class Album
     {
         public string[] Outputs { get; set; }
+        public string[] Tags { get; set; }
         public string Title { get; set; }
         public string Description { get; set; }
         public string BaseURL { get; set; }
