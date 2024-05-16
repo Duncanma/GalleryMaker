@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 
 namespace GalleryMaker
@@ -24,6 +25,10 @@ namespace GalleryMaker
         public string Description { get; set; }
         public string BaseURL { get; set; }
         public int Featured {  get; set; }
+        public DateTimeOffset startDate { get; set; }
+
+        [JsonPropertyName("Date")]
+        public DateTimeOffset endDate { get; set; }
         public List<Picture> Pictures { get; set; } 
 
     }
@@ -54,4 +59,18 @@ namespace GalleryMaker
         public int Height { get; set; }
     }
 
+    public class DateTimeComparer : IComparer<DateTimeOffset?>
+    {
+        #region IComparer<DateTimeOffset?> Members
+
+        public int Compare(DateTimeOffset? x, DateTimeOffset? y)
+        {
+            DateTimeOffset nx = x ?? DateTimeOffset.MaxValue;
+            DateTimeOffset ny = y ?? DateTimeOffset.MaxValue;
+
+            return nx.CompareTo(ny);
+        }
+
+        #endregion
+    }
 }

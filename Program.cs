@@ -23,7 +23,31 @@ namespace GalleryMaker
             "93c8d183d589c178878fc954bb2b9633",
             "55357baa98c5210a7271144b6b2a09c7",
             "f679f80d3a5c3acb98a5255698d676eb",
-            "d5f304d795096f00b8b52838288c05b0"
+            "d5f304d795096f00b8b52838288c05b0",
+            "59d9ae4a761bef5da4e8d053dd9fbaf9",
+            "92989ea63d7aa7d59919da88a85c0a77",
+            "3939584e5bab7bf767f33ca532f30c59",
+            "4cfed7c1a8fc83e28db930308c41fb1b",
+            "c6fc64be18bb17c57d9a65450f2fbe6b",
+            "779bf1902f8ce56d8a5ca16ad1465b33",
+            "4a2768fc0f8fb964d0ae4feb5326fc19",
+            "c85ebfb195e5175dbc01b4ad21176ed9",
+            "cf6a7fd514c619a20371885cb0ee3a8a",
+            "70b6e255e22bbfe80ac105a0e7496f58",
+            "89b8cd515faa748606ed71a7f95b904c",
+            "4df06614f2ca93ebd83400b02334c9c6",
+            "3f78c44cb3e6b60b82a04c1db1521746",
+            "e4fac63f77b772363f4e7e1111800832",
+            "55a144c47be1ebd280131c35c045f9c2",
+            "ff40a2e6ba01723846e92b6057edc4cd",
+            "2a23d1b47dadbca8ab44d027dd692e4d",
+            "71e60a77afe5e590e8f2b5e4f44adad3",
+            "e29b784011ff972c7be9365e52f6faf8",
+            "c9df56ecf240ad666737adcb9cb2b5c7",
+            "3138f5a7913fcbc939e2c9e3551da0a3",
+            "6c3d5c74cd3965ea98041ddd8e713d11",
+            "f988ae3dfeda752ed08022af8bd50030",
+            "fc2d96b8ce69042981f7edffe611a818",
         ];
 
         static bool doFileCopyandUpload = true;
@@ -58,11 +82,17 @@ namespace GalleryMaker
                 LoadProducts();
             }
 
+            string outputMarkdownFile = string.Empty;
 
             //determine if the provided folder is a folder of folders or of images
-            if (args.Length != 3)
+            if (args.Length != 3 && args.Length != 4)
             {
                 Console.WriteLine("Invalid number of arguments supplied");
+            }
+
+            if (args.Length==4)
+            {
+                outputMarkdownFile = args[3];
             }
 
             string inputPath = args[0];
@@ -96,6 +126,14 @@ namespace GalleryMaker
                     {
                         album.Outputs = ["html", "purchase"];
                     }
+
+                    List<DateTimeOffset?> pictureDates = pictures.Where(p => p.DateTimeOriginal.HasValue).Select(p => p.DateTimeOriginal).ToList();
+
+                    pictureDates.Sort(new DateTimeComparer());
+
+                    album.startDate = pictureDates.First().Value;
+                    album.endDate = pictureDates.Last().Value;
+
                     var existingAlbum = albumList.Find(a => a.BaseURL == baseURL);
                     if (existingAlbum != null)
                     {
@@ -103,6 +141,7 @@ namespace GalleryMaker
                         album.Title = existingAlbum.Title;
                         album.Featured = existingAlbum.Featured;
                         album.Tags = existingAlbum.Tags;
+                        album.Outputs = existingAlbum.Outputs;
                     }
                     else
                     {
@@ -130,17 +169,37 @@ namespace GalleryMaker
                     album.Outputs = ["html", "purchase"];
                 }
 
+                List<DateTimeOffset?> pictureDates = pictures.Where(p => p.DateTimeOriginal.HasValue).Select(p => p.DateTimeOriginal).ToList();
+                
+                pictureDates.Sort(new DateTimeComparer());
+
+                album.startDate = pictureDates.First().Value;
+                album.endDate = pictureDates.Last().Value;
+
                 var existingAlbum = albumList.Find(a => a.BaseURL == baseURL);
                 if (existingAlbum != null)
                 {
                     album.Description = existingAlbum.Description;
                     album.Title = existingAlbum.Title;
                     album.Featured = existingAlbum.Featured;
+                    album.Tags = existingAlbum.Tags;
+                    album.Outputs = existingAlbum.Outputs;
+                }
+                else
+                {
+                    album.Tags = ["Photography"];
                 }
 
                 string output = JsonSerializer.Serialize(album, options);
                 Console.WriteLine(output);
                 File.WriteAllText(Path.Combine(outputPath, "album.json"), output);
+
+                if (outputMarkdownFile != string.Empty)
+                {
+                    string markdownFile = $"---\n{output}\n---\n";
+
+                    File.WriteAllText(Path.Combine("C:\\Repos\\Blog\\content\\albums", $"{outputMarkdownFile}.md"), markdownFile);
+                }
             }
         }
 
@@ -232,7 +291,6 @@ namespace GalleryMaker
                     //if it's a zoom lens
                     bool zoomLens = Regex.IsMatch(lens, "\\d.-\\d.mm");
 
-
                     if (zoomLens)
                     {
                         var Focal = exif.GetValue(ExifTag.FocalLength);
@@ -305,7 +363,7 @@ namespace GalleryMaker
                     uniqueID = sourceID
                 };
 
-                if (doFileCopyandUpload && doStripeStuff)
+                if (doFileCopyandUpload)
                 {
                     List<string> thumbnails = new List<string>();
                     pic.Links.Add(ResizeAndSaveFile(outputPath, file, imageFromFile, 2160, baseURL));
@@ -319,7 +377,7 @@ namespace GalleryMaker
                     }
 
 
-                    if (!notForSaleProducts.Contains(sourceID) || Math.Max(height, width) < 3000)
+                    if ((!notForSaleProducts.Contains(sourceID) || Math.Max(height, width) < 3000) && doStripeStuff)
                     {
                         string paymentLinkURL = CreateStripeObjects(fileSize, height, width, pic.Title, pic.uniqueID, pic.Caption, thumbnails);
                         pic.PaymentLink = paymentLinkURL;
